@@ -1,0 +1,449 @@
+This project is a mini google drive,,it enables upload of files,for a specific user.It uses jwt for authorisation,RBAC(ROLE BASED ACCESS CONTROL),upload of files,and pictures,also connects to datadase. In phase two i intend to put payment intergration ,sharing version control and moving to the cloud.
+
+High-level architecture (what talks to what)
+
+Frontend: React (Create React App / Vite) or Next.js (optional SSR). Responsible for user flows: signup/login, profile, dashboard, file upload (with progress), search, notifications.
+
+Backend: FastAPI (your current code). Handles auth, RBAC, mpesa, file uploads, search, tags, notifications, logs, REST API.
+
+Database: PostgreSQL (Render DB or Supabase Postgres). Use Alembic for migrations.
+
+File storage: Supabase Storage or Cloudinary (free tiers). Store metadata in Postgres, files in storage (urls).
+
+Email: Brevo / SendGrid (free tier) for password reset and share notifications.
+
+Auth: JWT access tokens + refresh tokens. Passwords hashed with bcrypt.
+
+Deployment / CI: GitHub → Render (auto-deploy). Optional: GitHub Actions for CI tests.
+
+Monitoring & Logs: Sentry (errors), Render logs, and activity_logs table in DB for forensic audit.
+
+Primary components & responsibilities
+
+Auth & RBAC
+
+Signup / login / logout
+
+JWT access + refresh tokens
+
+roles table + many-to-many user_roles
+
+helper functions: user_has_roles, user_has_permissions
+
+Users
+
+Profile CRUD (name, email, bio, avatar)
+
+Upload avatar (image transform + CDN)
+
+Password reset (email flow)
+
+Files
+
+Upload (files and videos), download, delete
+
+File metadata in DB: owner, filename, url, size, mime, visibility
+
+Tags & search: tag table + file_tags join table and search endpoints
+
+Sharing & Permissions (phase 2)
+
+Share link generation with expiry & permissions
+
+Group/Folder support (optional later)
+
+Notifications
+
+In-app notifications saved in DB
+
+Email notifications on sharing
+
+Activity logs
+
+Insert logs for upload/download/share/delete/edit for auditing
+
+Daraja (MPESA)
+
+STK push endpoint
+
+Callback endpoint which saves transaction details
+
+Track transaction status and store in DB
+
+Database schema (essential tables)
+
+Users
+
+id (PK)
+
+name
+
+email (unique)
+
+password_hash
+
+avatar_url
+
+bio
+
+created_at, updated_at
+
+Roles
+
+id, name (unique)
+
+user_roles (join)
+
+user_id, role_id
+
+Permissions (optional)
+
+id, name
+
+Files
+
+id
+
+owner_id (FK -> users.id)
+
+filename
+
+storage_path (or external URL)
+
+mime_type
+
+size
+
+visibility (private/public)
+
+created_at, updated_at
+
+Tags
+
+id, name
+
+file_tags (join)
+
+file_id, tag_id
+
+Transactions (mpesa)
+
+id
+
+user_id (nullable)
+
+merchant_request_id
+
+checkout_request_id
+
+result_code
+
+result_desc
+
+amount
+
+phone_number
+
+receipt_number
+
+raw_callback_json
+
+created_at
+
+Notifications
+
+id
+
+user_id
+
+type
+
+payload (json)
+
+is_read boolean
+
+created_at
+
+ActivityLogs
+
+id
+
+user_id (nullable)
+
+action (enum: upload, delete, share, login, etc.)
+
+target_type (file/user/transaction)
+
+target_id
+
+meta (json)
+
+created_at
+
+RefreshTokens
+
+id, jti, user_id, token_hash, expires_at, revoked, orig_iat, replaced_by
+
+API endpoints (core)
+
+Auth / Users
+
+POST /auth/signup
+
+POST /auth/login -> returns access + refresh
+
+POST /auth/refresh -> refresh token
+
+POST /auth/logout
+
+POST /auth/forgot-password -> sends email
+
+POST /auth/reset-password -> token + new password
+
+GET /users/me
+
+PUT /users/me
+
+POST /users/me/avatar (multipart upload)
+
+GET /users/{id} (public profile)
+
+Files
+
+POST /files/upload (multipart) — returns file metadata + url
+
+GET /files/{id}/download (signed URL or redirect)
+
+DELETE /files/{id}
+
+GET /users/me/files
+
+GET /files/search?q=&tags=&type=
+
+POST /files/{id}/tags -> add tags
+
+DELETE /files/{id}/tags/{tag_id}
+
+Sharing
+
+POST /files/{id}/share -> create share link (token, expires)
+
+GET /share/{token} -> download/view
+
+Notifications
+
+GET /notifications
+
+POST /notifications/mark-read
+
+Activity Logs (admin)
+
+GET /admin/logs (filtered)
+
+MPESA
+
+POST /mpesa/stkpush (public or auth-protected depending on your choice)
+
+POST /mpesa/callback (public endpoint Safaricom will call)
+
+Admin
+
+CRUD roles/permissions (protected by superadmin)
+
+File upload flow (frontend ↔ backend)
+
+Frontend uses FormData to upload file to backend (or directly to storage provider using signed url).
+
+Backend receives file, validates type/size, stores in Cloudinary / Supabase Storage and saves metadata row in Files.
+
+Backend responds with file metadata + CDN URL.
+
+Frontend shows progress with onUploadProgress (axios) and updates dashboard when done.
+
+Add a notification and activity log entry.
+
+Optionally: Use direct upload to storage (frontend uploads to S3-like storage using a pre-signed URL) — reduces load on backend.
+
+Password reset flow (safe)
+
+User submits POST /auth/forgot-password with email.
+
+Backend generates short-lived token (JWT with exp 15 min or UUID stored hashed in DB) and sends reset link via email: https://app.com/reset?token=...
+
+User loads reset page, enters new password, frontend POSTs POST /auth/reset-password with token+newPassword.
+
+Backend verifies token, updates password hash, invalidates token, logs activity.
+
+Use Brevo/Sendgrid SMTP for emails. Never log tokens raw.
+
+Search & Tags implementation
+
+Create tags table.
+
+On upload, allow user to add tags (strings); convert to lowercase, dedupe, store.
+
+For search:
+
+SQL WHERE filename ILIKE '%q%' OR mime_type ILIKE '%q%' plus join on tags for tag matches.
+
+Use full text search / trigram later (Postgres pg_trgm) for better performance.
+
+For scale: Add ElasticSearch/MeiliSearch later.
+
+Notifications & Activity Logs
+
+On key actions (upload, delete, share, edit), create:
+
+a notifications row for user(s)
+
+an activity_logs row
+
+Frontend polls /notifications or use WebSocket/Server-Sent Events for live notifications.
+
+Security checklist
+
+Hash passwords with bcrypt; use pydantic validation for inputs.
+
+Always validate file types & size (block dangerous file types).
+
+Use HTTPS in production; Render provides free TLS.
+
+Store secrets via environment variables (Render env).
+
+Use CSRF protections if you have cookie-based auth (we use JWT).
+
+Rate limit endpoints like /auth/forgot-password and /mpesa/stkpush.
+
+Validate callback origin (Daraja) by checking IPs/headers/signature if provided.
+
+Deployment & infra (free-first)
+
+Backend: Render (free web service for hobby). Use uvicorn app.main:app --host 0.0.0.0 --port $PORT.
+
+DB: Render PostgreSQL or Supabase free tier.
+
+Storage: Supabase Storage (1GB free) or Cloudinary free plan.
+
+Email: Brevo / SendGrid free tier.
+
+Backup: schedule DB dump to storage or use Supabase backups.
+
+CI: GitHub Actions to run lint/tests before push; Render auto-deploys on push.
+
+Sprints & milestones (practical plan)
+
+I’ll break this into 8 sprints (1–2 weeks each depending on how much time you have).
+
+Sprint 1 — (Core Auth & RBAC)
+
+Setup project scaffold (fastapi, alembic, requirements).
+
+Implement models: users, roles, user_roles, refresh tokens.
+
+Signup/login/refresh/logout endpoints.
+
+Seed superadmin via lifespan (done).
+
+Tests for auth flows.
+
+Sprint 2 — (User profiles + avatar)
+
+Profile endpoints (GET/PUT).
+
+Avatar upload endpoint (Cloudinary or Supabase).
+
+Serve avatar URLs.
+
+Tests & UI mock for profile.
+
+Sprint 3 — (File upload basics)
+
+File model, upload endpoint, store in storage provider.
+
+Dashboard endpoint: list user files.
+
+Upload progress demo in frontend.
+
+Activity logging on upload.
+
+Sprint 4 — (Search & Tags)
+
+Tag model, file_tags join.
+
+Add tags on upload or via endpoint.
+
+Search endpoint (filename, mime, tag).
+
+Frontend search UI.
+
+Sprint 5 — (Sharing & notifications)
+
+Share links (token + expiry).
+
+Notifications table + endpoint.
+
+Email notifications on share.
+
+Add in-app notification UI.
+
+Sprint 6 — (MPESA integration)
+
+STK push endpoint + callback saving to transactions.
+
+Show transactions in user dashboard.
+
+Tests with sandbox; add logging & retries.
+
+Sprint 7 — (Admin, logs, security hardening)
+
+Admin endpoints for roles/permissions.
+
+Admin logs viewer.
+
+Rate limiting, input validation, secure headers.
+
+Sprint 8 — (Polish, tests, CI/CD)
+
+End-to-end tests (auth + upload + mpesa).
+
+Monitoring setup (Sentry).
+
+CI: run tests on push.
+
+Prepare production keys and checklist for going live with Daraja.
+
+Data migration strategy
+
+Use Alembic for migrations.
+
+Keep seeds (roles, admin) in migration or in lifespan seed code.
+
+Back up DB before running big migrations.
+
+Cost & free-tier notes
+
+You can build and run the whole app on free tiers initially:
+
+Render free for backend + Render Postgres free small DB.
+
+Supabase free for storage and auth (alternative).
+
+Cloudinary free for images.
+
+Brevo/SendGrid free for email.
+
+Monitor usage: video files and many uploads will require paid storage eventually.
+
+What I can do next (pick one — I’ll implement immediately)
+
+Scaffold backend project files + Alembic + basic models + auth endpoints.
+
+Generate full SQLAlchemy models for the schema above (Users, Roles, Files, Tags, Transactions, Notifications, ActivityLogs).
+
+Write files endpoints: upload (to Supabase or Cloudinary), list, download.
+
+Write search & tags endpoints and SQL queries.
+
+Implement callback parsing + transaction saving for MPESA.
+
+Create starter React dashboard with upload progress & notifications.
