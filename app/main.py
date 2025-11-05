@@ -7,6 +7,7 @@ from app.model import Role,User
 from app.routes.users import router as users_router
 from app.routes.document import router as document_router
 from datetime import datetime, timezone
+from fastapi.middleware.cors import CORSMiddleware
 
 
 @asynccontextmanager
@@ -53,3 +54,14 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(auth_router, prefix="/auth", tags =["users"])
 app.include_router(users_router, prefix="/profile", tags = ["profile"])
 app.include_router(document_router, prefix="/files", tags=["files"])
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://lovafiles-dash.vercel.app/"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
