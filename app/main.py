@@ -56,11 +56,14 @@ app.include_router(users_router, prefix="/profile", tags = ["profile"])
 app.include_router(document_router, prefix="/files", tags=["files"])
 
 
+origins = [
+    "https://lovafiles-dash.vercel.app",  # ✅ Your frontend live URL
+    "http://localhost:5173",              # ✅ Optional for local dev
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://lovafiles-dash.vercel.app/"
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
